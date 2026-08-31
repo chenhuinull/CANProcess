@@ -1,4 +1,4 @@
-"""GUI tool for merging Vector ASC log files."""
+﻿"""GUI tool for merging Vector ASC log files."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import ctypes
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Callable
 from tkinter import Tk, Listbox, Text, Toplevel, END, DISABLED, NORMAL
 from tkinter import filedialog, messagebox, ttk
 from ctypes import wintypes
@@ -55,6 +56,20 @@ def application_directory() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def create_output_directory(root: Path | None = None) -> Path:
+    """Create a unique out/AscMerger_YYYYmmdd_HHMMSS directory for one merge run."""
+    output_root = root if root is not None else application_directory() / "out"
+    output_root.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    destination = output_root / f"AscMerger_{timestamp}"
+    suffix = 1
+    while destination.exists():
+        destination = output_root / f"AscMerger_{timestamp}_{suffix:02d}"
+        suffix += 1
+    destination.mkdir()
+    return destination
 
 
 class GUID(ctypes.Structure):
@@ -180,7 +195,11 @@ def find_time_overlaps(ranges: list[tuple[datetime, datetime, Path]]) -> list[st
     return overlaps
 
 
-def merge_asc_files(selections: list[Path], output: Path) -> tuple[int, int, list[str], list[str]]:
+def merge_asc_files(
+    selections: list[Path],
+    output: Path,
+    progress: Callable[[float], None] | None = None,
+) -> tuple[int, int, list[str], list[str]]:
     candidates = collect_asc_files(selections)
     if not candidates:
         raise ValueError("No .asc files were found.")
@@ -202,6 +221,9 @@ def merge_asc_files(selections: list[Path], output: Path) -> tuple[int, int, lis
     valid.sort(key=lambda item: (item.start_time, str(item.path).lower()))
     first_time = valid[0].start_time
 
+    total_size = sum(item.path.stat().st_size for item in valid) or 1
+    done_size = 0
+
     ranges: list[tuple[datetime, datetime, Path]] = []
     with output.open("wb", buffering=4 * 1024 * 1024) as destination:
         destination.write(format_asc_date(first_time))
@@ -211,10 +233,20 @@ def merge_asc_files(selections: list[Path], output: Path) -> tuple[int, int, lis
             offset = (item.start_time - first_time).total_seconds()
             first_timestamp: float | None = None
             last_timestamp: float | None = None
+            file_size = item.path.stat().st_size or 0
+            start_fraction = done_size / total_size
+            end_fraction = (done_size + file_size) / total_size
+            bytes_read = 0
+            next_report = 0
             with item.path.open("rb", buffering=4 * 1024 * 1024) as source:
                 source.readline()  # date header
                 source.readline()  # base/timestamp header
                 for line in source:
+                    bytes_read += len(line)
+                    if progress is not None and bytes_read >= next_report:
+                        next_report = bytes_read + 1024 * 1024
+                        fraction = min(bytes_read / file_size, 1.0)
+                        progress(start_fraction + fraction * (end_fraction - start_fraction))
                     body = line.rstrip(b"\r\n")
                     match = TIMESTAMP_RE.match(body)
                     if match:
@@ -233,7 +265,10 @@ def merge_asc_files(selections: list[Path], output: Path) -> tuple[int, int, lis
                     item.start_time + timedelta(seconds=last_timestamp),
                     item.path,
                 ))
+            done_size += file_size
 
+    if progress is not None:
+        progress(1.0)
     return len(valid), len(candidates), skipped, find_time_overlaps(ranges)
 
 
@@ -241,8 +276,8 @@ class App:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("ASC 日志合并工具")
-        self.root.geometry("900x610")
-        self.root.minsize(720, 500)
+        self.root.geometry("900x720")
+        self.root.minsize(720, 560)
         self.sources: list[Path] = []
         self.last_output_dir: Path | None = None
 
@@ -254,16 +289,8 @@ class App:
         frame = ttk.Frame(root, padding=18)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=1)
-
-        header = ttk.Frame(frame)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
-        ttk.Label(header, text="ASC 日志合并工具", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(
-            header,
-            text="添加 ASC 文件或文件夹，检查时间重叠后按记录时间合并。支持多选文件夹与直接拖放。1970 年时间戳文件会自动跳过。",
-            style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
+        frame.rowconfigure(1, weight=3)
+        frame.rowconfigure(4, weight=1)
 
         source_box = ttk.LabelFrame(frame, text=" 1. 数据来源 ", padding=12)
         source_box.grid(row=1, column=0, sticky="nsew")
@@ -279,8 +306,8 @@ class App:
         list_frame = ttk.Frame(source_box)
         list_frame.grid(row=1, column=0, sticky="nsew")
         list_frame.columnconfigure(0, weight=1)
-        list_frame.rowconfigure(0, weight=1)
-        self.source_list = Listbox(list_frame, height=8, selectmode="extended", activestyle="none")
+        list_frame.rowconfigure(0, weight=1, minsize=180)
+        self.source_list = Listbox(list_frame, height=14, selectmode="extended", activestyle="none")
         self.source_list.grid(row=0, column=0, sticky="nsew")
         vertical_bar = ttk.Scrollbar(list_frame, orient="vertical", command=self.source_list.yview)
         vertical_bar.grid(row=0, column=1, sticky="ns")
@@ -297,7 +324,7 @@ class App:
         operation_box.columnconfigure(0, weight=1)
         ttk.Label(
             operation_box,
-            text="合并前可查看实际扫描到的 ASC 文件。\n合并完成后会显示无效文件与时间重叠检查结果。",
+            text="输出位置：out\\AscMerger_YYYYMMDD_HHMMSS\\AscMerger_时间戳.asc\n合并前可查看实际扫描到的 ASC 文件，合并完成后会显示无效文件与时间重叠检查结果。",
             justify="left",
         ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
         button_bar = ttk.Frame(operation_box)
@@ -309,10 +336,15 @@ class App:
 
         status_box = ttk.LabelFrame(frame, text=" 运行状态 ", padding=10)
         status_box.grid(row=4, column=0, sticky="nsew", pady=(14, 0))
-        self.status = Text(status_box, height=7, wrap="word", state=DISABLED, relief="flat", background="#f7f8fa")
+        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100)
+        self.progress.pack(fill="x", pady=(0, 8))
+        self.status = Text(status_box, height=6, wrap="word", state=DISABLED, relief="flat", background="#f7f8fa")
         self.status.pack(fill="both", expand=True)
         self.set_status("准备就绪：请先添加 ASC 文件或文件夹。")
         center_window(self.root)
+
+    def update_progress(self, fraction: float) -> None:
+        self.progress.configure(value=max(0.0, min(fraction, 1.0)) * 100)
 
     def set_status(self, text: str) -> None:
         self.status.configure(state=NORMAL)
@@ -386,12 +418,11 @@ class App:
         ttk.Button(container, text="关闭", command=dialog.destroy).pack(anchor="e", pady=(10, 0))
 
     def open_output_folder(self) -> None:
-        """Open the folder containing the latest merged file."""
-        if self.last_output_dir is None:
-            messagebox.showinfo("ASC 日志合并工具", "请先完成一次合并以确定输出文件夹。")
-            return
+        """Open the latest run's output folder, or the shared out folder."""
+        output_dir = self.last_output_dir or (application_directory() / "out")
         try:
-            os.startfile(self.last_output_dir)  # type: ignore[attr-defined]  # Windows-only application.
+            output_dir.mkdir(parents=True, exist_ok=True)
+            os.startfile(output_dir)  # type: ignore[attr-defined]  # Windows-only application.
         except OSError as error:
             messagebox.showerror("ASC 日志合并工具", f"无法打开输出文件夹：{error}")
 
@@ -399,24 +430,25 @@ class App:
         if not self.sources:
             messagebox.showwarning("ASC 日志合并工具", "请先添加至少一个 ASC 文件或文件夹。")
             return
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output = filedialog.asksaveasfilename(
-            title="保存合并后的 ASC 文件",
-            initialdir=application_directory(),
-            defaultextension=".asc",
-            initialfile=f"AscMerger_{timestamp}.asc",
-            filetypes=[("ASC 文件", "*.asc")],
-        )
-        if not output:
+        try:
+            output_dir = create_output_directory()
+        except OSError as error:
+            messagebox.showerror("ASC 日志合并工具", f"无法创建输出文件夹：{error}")
             return
-        self.last_output_dir = Path(output).parent
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output = output_dir / f"AscMerger_{timestamp}.asc"
+        self.last_output_dir = output_dir
         self.merge_button.configure(state=DISABLED)
+        self.progress.configure(value=0)
         self.set_status("正在合并文件，请稍候……")
-        threading.Thread(target=self.merge_worker, args=(self.sources.copy(), Path(output)), daemon=True).start()
+        threading.Thread(target=self.merge_worker, args=(self.sources.copy(), output), daemon=True).start()
 
     def merge_worker(self, sources: list[Path], output: Path) -> None:
+        def report(fraction: float) -> None:
+            self.root.after(0, self.update_progress, fraction)
+
         try:
-            valid, total, skipped, overlaps = merge_asc_files(sources, output)
+            valid, total, skipped, overlaps = merge_asc_files(sources, output, progress=report)
             message = f"合并完成：已合并 {valid}/{total} 个 ASC 文件。\n输出文件：{output}"
             if skipped:
                 message += "\n已跳过：\n" + "\n".join(skipped)
@@ -429,11 +461,10 @@ class App:
             self.root.after(0, self.merge_finished, f"合并失败：{error}", False)
 
     def merge_finished(self, message: str, succeeded: bool) -> None:
+        self.progress.configure(value=100 if succeeded else 0)
         self.set_status(message)
         self.merge_button.configure(state=NORMAL)
-        if succeeded:
-            messagebox.showinfo("ASC 日志合并工具", message)
-        else:
+        if not succeeded:
             messagebox.showerror("ASC 日志合并工具", message)
 
 

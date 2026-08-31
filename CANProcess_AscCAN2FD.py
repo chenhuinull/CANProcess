@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Replace ISO-TP-like 8-byte CAN messages in a Vector ASC file with CAN FD.
 
 The supported first frame is ``10 LL`` and consecutive frames are ``2N``.
@@ -20,6 +20,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 from tkinter import DISABLED, END, NORMAL, Listbox, StringVar, Text, Tk, Toplevel
 from tkinter import filedialog, messagebox, ttk
 from ctypes import wintypes
@@ -146,12 +147,21 @@ def convert(lines: list[str], fd_channel: str, target_id: int = DEFAULT_TARGET_I
     return output, converted
 
 
-def convert_file(source: Path, destination: Path, fd_channel: str, target_id: int = DEFAULT_TARGET_ID) -> tuple[int, int]:
+def convert_file(
+    source: Path,
+    destination: Path,
+    fd_channel: str,
+    target_id: int = DEFAULT_TARGET_ID,
+    progress: Callable[[float], None] | None = None,
+) -> tuple[int, int]:
     """Convert incrementally, so large ASC captures do not need to fit in memory.
 
     Interleaved traffic on other CAN IDs is retained.  It is held only until
     the current 6F4 transfer terminates, then emitted after the replacement FD
     frame, preserving the requested first-frame slot.
+
+    ``progress``, when given, is called with this file's 0.0-1.0 completion
+    fraction as it is read.
     """
     converted = 0
     discarded = 0
@@ -200,10 +210,17 @@ def convert_file(source: Path, destination: Path, fd_channel: str, target_id: in
         retained_lines = []
 
     # newline="" retains the input's newline bytes for lines that are preserved.
+    file_size = source.stat().st_size or 1
+    bytes_read = 0
+    next_report = 0
     with source.open("r", encoding="utf-8-sig", newline="") as input_file, destination.open(
         "w", encoding="utf-8", newline=""
     ) as output_file:
         for line in input_file:
+            bytes_read += len(line)
+            if progress is not None and bytes_read >= next_report:
+                next_report = bytes_read + 256 * 1024
+                progress(min(bytes_read / file_size, 1.0))
             record = parse_record(line, target_id)
             if active is None:
                 if record is not None and len(record.data) == 8 and record.data[0] == 0x10:
@@ -260,6 +277,8 @@ def convert_file(source: Path, destination: Path, fd_channel: str, target_id: in
                 flush_converted(output_file)
             else:
                 discard_incomplete(output_file)
+    if progress is not None:
+        progress(1.0)
     return converted, discarded
 
 
@@ -348,14 +367,14 @@ def application_directory() -> Path:
 
 
 def create_output_directory(root: Path | None = None) -> Path:
-    """Create a unique out/YYYYmmdd_HHMMSS directory for one conversion run."""
+    """Create a unique out/AscCAN2FD_YYYYmmdd_HHMMSS directory for one conversion run."""
     output_root = root if root is not None else application_directory() / "out"
     output_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    destination = output_root / timestamp
+    destination = output_root / f"AscCAN2FD_{timestamp}"
     suffix = 1
     while destination.exists():
-        destination = output_root / f"{timestamp}_{suffix:02d}"
+        destination = output_root / f"AscCAN2FD_{timestamp}_{suffix:02d}"
         suffix += 1
     destination.mkdir()
     return destination
@@ -398,9 +417,17 @@ def validate_fd_channel(value: str) -> str:
 
 
 def convert_sources(
-    selections: list[Path], output_dir: Path, fd_channel: str, target_id: int = DEFAULT_TARGET_ID
+    selections: list[Path],
+    output_dir: Path,
+    fd_channel: str,
+    target_id: int = DEFAULT_TARGET_ID,
+    progress: Callable[[float], None] | None = None,
 ) -> tuple[int, int, int, list[str]]:
-    """Convert every discovered ASC file and return file/count/error statistics."""
+    """Convert every discovered ASC file and return file/count/error statistics.
+
+    ``progress``, when given, is called with the overall 0.0-1.0 completion
+    fraction, weighted by the input files' sizes.
+    """
     sources = collect_asc_files(selections)
     if not sources:
         raise ValueError("No .asc files were found in the selected files or folders.")
@@ -410,15 +437,26 @@ def convert_sources(
     discarded = 0
     errors: list[str] = []
     used_names: set[str] = set()
+    total_size = sum(source.stat().st_size for source in sources) or 1
+    done_size = 0
     for source in sources:
         destination = destination_for(source, output_dir, used_names)
+        size = source.stat().st_size or 0
+        start_fraction = done_size / total_size
+        end_fraction = (done_size + size) / total_size
+
+        def file_progress(fraction: float, start: float = start_fraction, end: float = end_fraction) -> None:
+            if progress is not None:
+                progress(start + fraction * (end - start))
+
         try:
-            file_transfers, file_discarded = convert_file(source, destination, fd_channel, target_id)
+            file_transfers, file_discarded = convert_file(source, destination, fd_channel, target_id, progress=file_progress)
             converted_files += 1
             transfers += file_transfers
             discarded += file_discarded
         except (OSError, UnicodeError) as error:
             errors.append(f"{source}: {error}")
+        done_size += size
     return converted_files, transfers, discarded, errors
 
 
@@ -426,8 +464,8 @@ class ConverterApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("CAN 转 CAN FD 工具")
-        self.root.geometry("900x610")
-        self.root.minsize(720, 500)
+        self.root.geometry("900x720")
+        self.root.minsize(720, 560)
         self.sources: list[Path] = []
         self.last_output_dir: Path | None = None
         self.target_can_id = StringVar(value=f"{DEFAULT_TARGET_ID:X}")
@@ -441,12 +479,8 @@ class ConverterApp:
         frame = ttk.Frame(root, padding=18)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=1)
-
-        header = ttk.Frame(frame)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
-        ttk.Label(header, text="CAN 转 CAN FD 工具", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(header, text="添加 ASC 文件或文件夹，批量转换扫描到的每个 ASC 文件。结果保存在 out\\时间戳 文件夹中。", style="Subtitle.TLabel").pack(anchor="w", pady=(4, 0))
+        frame.rowconfigure(1, weight=3)
+        frame.rowconfigure(4, weight=1)
 
         source_box = ttk.LabelFrame(frame, text=" 1. 输入文件和文件夹 ", padding=12)
         source_box.grid(row=1, column=0, sticky="nsew")
@@ -462,8 +496,8 @@ class ConverterApp:
         list_frame = ttk.Frame(source_box)
         list_frame.grid(row=1, column=0, sticky="nsew")
         list_frame.columnconfigure(0, weight=1)
-        list_frame.rowconfigure(0, weight=1)
-        self.source_list = Listbox(list_frame, height=8, selectmode="extended", activestyle="none")
+        list_frame.rowconfigure(0, weight=1, minsize=180)
+        self.source_list = Listbox(list_frame, height=14, selectmode="extended", activestyle="none")
         self.source_list.grid(row=0, column=0, sticky="nsew")
         vertical_bar = ttk.Scrollbar(list_frame, orient="vertical", command=self.source_list.yview)
         vertical_bar.grid(row=0, column=1, sticky="ns")
@@ -486,7 +520,7 @@ class ConverterApp:
         ttk.Entry(settings_bar, width=12, textvariable=self.fd_channel).pack(side="left", padx=(4, 0))
         ttk.Label(
             operation_box,
-            text="输出位置：out\\YYYYMMDD_HHMMSS\n每个输入 ASC 文件都会生成一个单独的转换结果。",
+            text="输出位置：out\\AscCAN2FD_YYYYMMDD_HHMMSS\n每个输入 ASC 文件都会生成一个单独的转换结果。",
             justify="left",
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
         button_bar = ttk.Frame(operation_box)
@@ -498,10 +532,15 @@ class ConverterApp:
 
         status_box = ttk.LabelFrame(frame, text=" 运行状态 ", padding=10)
         status_box.grid(row=4, column=0, sticky="nsew", pady=(14, 0))
-        self.status = Text(status_box, height=7, wrap="word", state=DISABLED, relief="flat", background="#f7f8fa")
+        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100)
+        self.progress.pack(fill="x", pady=(0, 8))
+        self.status = Text(status_box, height=6, wrap="word", state=DISABLED, relief="flat", background="#f7f8fa")
         self.status.pack(fill="both", expand=True)
         self.set_status("准备就绪：请先添加 ASC 文件或文件夹。")
         center_window(self.root)
+
+    def update_progress(self, fraction: float) -> None:
+        self.progress.configure(value=max(0.0, min(fraction, 1.0)) * 100)
 
     def set_status(self, text: str) -> None:
         self.status.configure(state=NORMAL)
@@ -599,12 +638,16 @@ class ConverterApp:
             return
         self.last_output_dir = output_dir
         self.convert_button.configure(state=DISABLED)
+        self.progress.configure(value=0)
         self.set_status(f"正在转换 {len(files)} 个 ASC 文件（输入 ID：{target_id:X}，输出通道：{fd_channel}），请稍候……")
         threading.Thread(target=self.convert_worker, args=(self.sources.copy(), output_dir, fd_channel, target_id), daemon=True).start()
 
     def convert_worker(self, sources: list[Path], output_dir: Path, fd_channel: str, target_id: int) -> None:
+        def report(fraction: float) -> None:
+            self.root.after(0, self.update_progress, fraction)
+
         try:
-            files, transfers, discarded, errors = convert_sources(sources, output_dir, fd_channel, target_id)
+            files, transfers, discarded, errors = convert_sources(sources, output_dir, fd_channel, target_id, progress=report)
             message = f"转换完成：已处理 {files} 个文件、{transfers} 组输入 ID {target_id:X} 的传输数据；已移除 {discarded} 个不完整或孤立报文。\n输出目录：{output_dir}"
             if errors:
                 message += "\n转换失败的文件：\n" + "\n".join(errors)
@@ -613,6 +656,7 @@ class ConverterApp:
             self.root.after(0, self.conversion_finished, f"转换失败：{error}", False)
 
     def conversion_finished(self, message: str, succeeded: bool) -> None:
+        self.progress.configure(value=100 if succeeded else 0)
         self.set_status(message)
         self.convert_button.configure(state=NORMAL)
         (messagebox.showinfo if succeeded else messagebox.showerror)("CAN 转 CAN FD 工具", message)

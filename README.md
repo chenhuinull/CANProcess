@@ -1,7 +1,8 @@
 # CANProcess
 
-Vector ASC 日志处理工具集，包含两个 Windows GUI 工具：
+Vector CAN 日志处理工具集，包含三个 Windows GUI 工具：
 
+- **BLF / ASC 互转工具**（`CANProcess_BlfAscConvert.py`）：将 Vector BLF 与 ASC 日志互相转换，支持一次添加多个文件或文件夹批量处理，兼容经典 CAN 与 CAN FD。
 - **CAN 转 CAN FD 工具**（`CANProcess_AscCAN2FD.py`）：将 ASC 文件中指定 CAN ID 的经典 CAN 8 字节报文（ISO-TP 风格多帧传输）合并转换为 64 字节 CAN FD 报文。
 - **ASC 日志合并工具**（`CANProcess_AscMerger.py`）：将多个 ASC 日志文件按记录起始时间合并为一个文件，并检查时间重叠。
 
@@ -9,6 +10,7 @@ Vector ASC 日志处理工具集，包含两个 Windows GUI 工具：
 
 | 文件 | 说明 |
 | --- | --- |
+| `CANProcess_BlfAscConvert.py` | BLF / ASC 互转工具（GUI + 命令行模式） |
 | `CANProcess_AscCAN2FD.py` | CAN 转 CAN FD 工具（GUI + 命令行模式） |
 | `CANProcess_AscMerger.py` | ASC 日志合并工具（GUI） |
 | `Py2Exe.bat` | 基于 PyInstaller 的通用打包脚本 |
@@ -17,29 +19,48 @@ Vector ASC 日志处理工具集，包含两个 Windows GUI 工具：
 ## 依赖
 
 - Python 3.10+
-- 仅标准库（tkinter、ctypes 等），无需额外安装
+- BLF / ASC 互转工具依赖 [`python-can`](https://pypi.org/project/python-can/)；其余工具仅使用标准库（tkinter、ctypes 等）
 - 可选：`tkinterdnd2`（启用后支持将文件拖放到窗口列表）
 
 ```powershell
-pip install tkinterdnd2   # 可选
+pip install python-can     # BLF / ASC 互转工具必需
+pip install tkinterdnd2    # 可选，拖放支持
 ```
 
 ## 使用方式
 
 ### 方式一：直接运行 EXE
 
-进入 `release` 文件夹，双击 `CANProcess_AscCAN2FD.exe` 或 `CANProcess_AscMerger.exe`。
+进入 `release` 文件夹，双击对应的 EXE 文件。
 
 ### 方式二：Python 运行
 
 ```powershell
 # 打开 GUI
+python CANProcess_BlfAscConvert.py
 python CANProcess_AscCAN2FD.py
 python CANProcess_AscMerger.py
+
+# BLF / ASC 互转：命令行模式（无 GUI）
+python CANProcess_BlfAscConvert.py <BLF/ASC 文件或文件夹> [--direction auto|blf2asc|asc2blf] [--out-root 输出目录]
 
 # CAN 转 CAN FD：命令行模式（无 GUI）
 python CANProcess_AscCAN2FD.py <ASC 文件或文件夹> [--fd-channel 10] [--can-id 6F4] [--out-root 输出目录]
 ```
+
+## BLF / ASC 互转工具
+
+### 转换规则
+
+- 自动模式下：`.blf` 转为 `.asc`，`.asc` 转为 `.blf`；也可强制只做 BLF→ASC 或 ASC→BLF。
+- 支持一次选择多个文件、多个文件夹（文件夹递归扫描），或直接把文件/文件夹拖进窗口列表。
+- 基于 python-can 读写，完整保留：CAN ID（标准/扩展帧）、经典 CAN / CAN FD、BRS/ESI 标志、远程帧、错误帧、数据长度与数据内容、通道号、收发方向（Rx/Tx）。
+- 时间戳保持绝对时间基准：ASC 的 Triggerblock 日期与 BLF 的记录时间一致，不会从 0 重新开始。
+
+### 输出
+
+- 结果保存到 `out\YYYYMMDD_HHMMSS` 文件夹（脚本或 EXE 所在目录下），每个输入文件生成一个同名的 `.asc` 或 `.blf`。
+- 个别文件损坏或格式不受支持时会跳过并在结果中列出，不影响其余文件转换。
 
 ## CAN 转 CAN FD 工具
 
@@ -78,6 +99,7 @@ python CANProcess_AscCAN2FD.py <ASC 文件或文件夹> [--fd-channel 10] [--can
 将 `.py` 文件拖到 `Py2Exe.bat` 上，或：
 
 ```powershell
+Py2Exe.bat CANProcess_BlfAscConvert.py
 Py2Exe.bat CANProcess_AscCAN2FD.py
 Py2Exe.bat CANProcess_AscMerger.py
 ```
