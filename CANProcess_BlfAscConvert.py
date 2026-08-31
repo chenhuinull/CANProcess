@@ -133,14 +133,14 @@ def application_directory() -> Path:
 
 
 def create_output_directory(root: Path | None = None) -> Path:
-    """Create a unique out/YYYYmmdd_HHMMSS directory for one conversion run."""
+    """Create a unique out/BlfAscConvert_YYYYmmdd_HHMMSS run directory."""
     output_root = root if root is not None else application_directory() / "out"
     output_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    destination = output_root / timestamp
+    destination = output_root / f"BlfAscConvert_{timestamp}"
     suffix = 1
     while destination.exists():
-        destination = output_root / f"{timestamp}_{suffix:02d}"
+        destination = output_root / f"BlfAscConvert_{timestamp}_{suffix:02d}"
         suffix += 1
     destination.mkdir()
     return destination
@@ -580,7 +580,7 @@ class ConverterApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("BLF / ASC 互转工具")
-        self.root.geometry("900x720")
+        self.root.geometry("900x760")
         self.root.minsize(720, 560)
         self.sources: list[Path] = []
         self.last_output_dir: Path | None = None
@@ -590,6 +590,7 @@ class ConverterApp:
         style.configure("Title.TLabel", font=("Microsoft YaHei UI", 16, "bold"))
         style.configure("Subtitle.TLabel", foreground="#5b6472")
         style.configure("Primary.TButton", font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("Thick.Horizontal.TProgressbar", thickness=20)
 
         frame = ttk.Frame(root, padding=18)
         frame.pack(fill="both", expand=True)
@@ -636,7 +637,7 @@ class ConverterApp:
         direction_box.pack(side="left", padx=(4, 0))
         ttk.Label(
             operation_box,
-            text="输出位置：out\\YYYYMMDD_HHMMSS\n每个输入文件都会生成一个同名的 .blf 或 .asc 文件。",
+            text="输出位置：out\\BlfAscConvert_YYYYMMDD_HHMMSS\n每个输入文件都会生成一个同名的 .blf 或 .asc 文件。",
             justify="left",
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
         button_bar = ttk.Frame(operation_box)
@@ -648,10 +649,10 @@ class ConverterApp:
 
         status_box = ttk.LabelFrame(frame, text=" 运行状态 ", padding=10)
         status_box.grid(row=4, column=0, sticky="nsew", pady=(14, 0))
-        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100)
-        self.progress.pack(fill="x", pady=(0, 8))
         self.status = Text(status_box, height=6, wrap="word", state=DISABLED, relief="flat", background="#f7f8fa")
         self.status.pack(fill="both", expand=True)
+        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100, style="Thick.Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(8, 0))
         if can is None:
             self.set_status("缺少 python-can 库，无法转换。请先运行：pip install python-can")
         else:

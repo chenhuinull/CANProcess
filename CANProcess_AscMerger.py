@@ -276,7 +276,7 @@ class App:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("ASC 日志合并工具")
-        self.root.geometry("900x720")
+        self.root.geometry("900x760")
         self.root.minsize(720, 560)
         self.sources: list[Path] = []
         self.last_output_dir: Path | None = None
@@ -285,6 +285,7 @@ class App:
         style.configure("Title.TLabel", font=("Microsoft YaHei UI", 16, "bold"))
         style.configure("Subtitle.TLabel", foreground="#5b6472")
         style.configure("Primary.TButton", font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("Thick.Horizontal.TProgressbar", thickness=20)
 
         frame = ttk.Frame(root, padding=18)
         frame.pack(fill="both", expand=True)
@@ -336,10 +337,10 @@ class App:
 
         status_box = ttk.LabelFrame(frame, text=" 运行状态 ", padding=10)
         status_box.grid(row=4, column=0, sticky="nsew", pady=(14, 0))
-        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100)
-        self.progress.pack(fill="x", pady=(0, 8))
         self.status = Text(status_box, height=6, wrap="word", state=DISABLED, relief="flat", background="#f7f8fa")
         self.status.pack(fill="both", expand=True)
+        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100, style="Thick.Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(8, 0))
         self.set_status("准备就绪：请先添加 ASC 文件或文件夹。")
         center_window(self.root)
 

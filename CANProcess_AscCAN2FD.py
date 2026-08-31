@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 import os
-import re
 import sys
 import threading
 from dataclasses import dataclass
@@ -34,11 +33,7 @@ except ImportError:
 
 
 DEFAULT_TARGET_ID = 0x6F4
-RECORD = re.compile(
-    r"^(?P<time>\s*\d+(?:\.\d+)?)\s+CAN\s+(?P<channel>\S+)\s+"
-    r"(?P<can_id>\S+)\s+(?P<direction>Rx|Tx)\s+(?P<tail>.*)$",
-    re.IGNORECASE,
-)
+_HEX_BYTES = set("0123456789abcdefABCDEF")
 
 FOS_FORCEFILESYSTEM = 0x00000040
 FOS_ALLOWMULTISELECT = 0x00000200
@@ -59,31 +54,123 @@ def center_window(window: Tk) -> None:
 @dataclass(frozen=True)
 class CanRecord:
     timestamp: str
+    channel: str
     can_id_text: str
     direction: str
     data: bytes
 
 
-def parse_record(line: str, target_id: int = DEFAULT_TARGET_ID) -> CanRecord | None:
-    """Parse the conventional Vector ASC CAN line used by this converter."""
-    match = RECORD.match(line.rstrip("\r\n"))
-    if not match:
+def parse_record(
+    line: str, target_id: int = DEFAULT_TARGET_ID, channel: str | None = None
+) -> CanRecord | None:
+    """Parse a classic-CAN ASC line from Vector CANoe or TSMASTER.
+
+    Two classic-CAN layouts are recognised:
+
+    * CANoe keyword form:  ``<ts> CAN <ch> <id> <Rx|Tx> [0 0] d <dlc> <len> <data>``
+    * TSMASTER legacy form: ``<ts> <ch> <id> <Rx|Tx> d <dlc> <data>``
+
+    CAN FD lines are ignored.  When ``channel`` is given, records on any other
+    channel are treated as non-matching so the caller can restrict conversion
+    to one source channel.
+    """
+    fields = line.rstrip("\r\n").split()
+    if len(fields) < 6:
         return None
     try:
-        if int(match["can_id"], 16) != target_id:
-            return None
-        fields = match["tail"].split()
-        data_marker = next(i for i, field in enumerate(fields) if field.lower() == "d")
-        byte_count = int(fields[data_marker + 2], 10)
-        data = bytes(int(value, 16) for value in fields[data_marker + 3 : data_marker + 3 + byte_count])
-        if len(data) != byte_count:
-            return None
-    except (ValueError, StopIteration, IndexError):
+        float(fields[0])
+    except ValueError:
         return None
-    return CanRecord(match["time"].strip(), match["can_id"], match["direction"], data)
+    index = 1
+    keyword = fields[index].upper()
+    if keyword in ("CANFD", "CAN_FD"):
+        return None
+    if keyword == "CAN":
+        index += 1
+
+    # The Rx/Tx marker sits after the channel and ID (CANoe classic and
+    # TSMASTER legacy both use <ch> <id> <dir>); a <ch> <dir> <id> order is
+    # tolerated too.
+    count = len(fields)
+    token1 = fields[index + 1] if index + 1 < count else ""
+    token2 = fields[index + 2] if index + 2 < count else ""
+    if token1 in ("Rx", "Tx", "rx", "tx"):
+        source_channel = fields[index]
+        id_text = token2
+        direction = token1
+        index += 3
+    elif token2 in ("Rx", "Tx", "rx", "tx"):
+        source_channel = fields[index]
+        id_text = token1
+        direction = token2
+        index += 3
+    else:
+        return None
+
+    try:
+        if int(id_text, 16) != target_id:
+            return None
+    except ValueError:
+        return None
+    if channel is not None and source_channel != channel:
+        return None
+
+    try:
+        data_marker = next(i for i in range(index, len(fields)) if fields[i].lower() == "d")
+        dlc = int(fields[data_marker + 1], 16)
+    except (StopIteration, ValueError, IndexError):
+        return None
+    rest = fields[data_marker + 2:]
+    # Collect the two-digit hex tokens that form the payload.  CANoe keyword
+    # lines repeat the payload length as a decimal token before the bytes;
+    # single-digit length/DLC tokens are naturally skipped by this filter.
+    hex_tokens = [token for token in rest if len(token) == 2 and token[0] in _HEX_BYTES and token[1] in _HEX_BYTES]
+    data = bytes.fromhex("".join(hex_tokens[:dlc]))
+    if len(data) != dlc:
+        return None
+    return CanRecord(fields[0], source_channel, id_text, direction, data)
 
 
-def fd_line(record: CanRecord, payload: bytes, fd_channel: str) -> str:
+def detect_style(source: Path) -> str:
+    """Return 'tsmaster' or 'vector' based on the ASC file's line layout.
+
+    TSMASTER exports classic CAN rows without the ``CAN`` keyword and CAN FD
+    rows with an ``f`` marker, while Vector CANoe writes the ``CAN`` keyword
+    and a ``d 15`` DLC marker.  The generated CAN FD lines must match the input
+    file's own layout so the output stays column-aligned.
+    """
+    try:
+        with source.open("r", encoding="utf-8-sig", newline="") as handle:
+            for line in handle:
+                fields = line.split()
+                if len(fields) < 2:
+                    continue
+                keyword = fields[1].upper()
+                if keyword == "CAN":
+                    return "vector"
+                if keyword in ("CANFD", "CAN_FD"):
+                    try:
+                        marker = next(field for field in fields[2:] if field.lower() in ("d", "f"))
+                    except StopIteration:
+                        continue
+                    return "tsmaster" if marker.lower() == "f" else "vector"
+                if len(fields) >= 5 and fields[3] in ("Rx", "Tx", "rx", "tx"):
+                    return "tsmaster"
+    except (OSError, UnicodeError):
+        pass
+    return "vector"
+
+
+def fd_line(record: CanRecord, payload: bytes, fd_channel: str, style: str = "vector") -> str:
+    """Build one CAN FD output line in the Vector or TSMASTER column layout."""
+    if style == "tsmaster":
+        values = " ".join(f"{value:02X}" for value in payload)
+        head = (
+            f" {record.timestamp} CANFD  {fd_channel:>2} {record.direction}"
+            f"{' ' * 8}{record.can_id_text.upper():>3}{' ' * 35}"
+        )
+        tail = " " * 8 + "0" + " " * 4 + "0" + " " * 5 + "1000" + " " * 8 + "0" + " " * 8 + "0" + " " * 8 + "0" + " " * 8 + "0" + " " * 8 + "0"
+        return f"{head}0 0 f 64 {values}{tail}\n"
     values = " ".join(f"{value:02x}" for value in payload)
     # In Vector ASC, CAN FD DLC 15 denotes the 64-byte payload length.
     return f"{record.timestamp} CANFD {fd_channel} {record.can_id_text} {record.direction} 0 0 d 15 64 {values}\n"
@@ -94,9 +181,9 @@ def is_short_single_frame(record: CanRecord) -> bool:
     return len(record.data) == 8 and 0 <= record.data[0] <= 7
 
 
-def write_short_single_frame(handle, record: CanRecord, fd_channel: str) -> None:
+def write_short_single_frame(handle, record: CanRecord, fd_channel: str, style: str = "vector") -> None:
     length = record.data[0]
-    handle.write(fd_line(record, record.data[1 : 1 + length].ljust(64, b"\xAA"), fd_channel))
+    handle.write(fd_line(record, record.data[1 : 1 + length].ljust(64, b"\xAA"), fd_channel, style))
 
 
 def convert(lines: list[str], fd_channel: str, target_id: int = DEFAULT_TARGET_ID) -> tuple[list[str], int]:
@@ -152,6 +239,7 @@ def convert_file(
     destination: Path,
     fd_channel: str,
     target_id: int = DEFAULT_TARGET_ID,
+    source_channel: str | None = None,
     progress: Callable[[float], None] | None = None,
 ) -> tuple[int, int]:
     """Convert incrementally, so large ASC captures do not need to fit in memory.
@@ -160,11 +248,15 @@ def convert_file(
     the current 6F4 transfer terminates, then emitted after the replacement FD
     frame, preserving the requested first-frame slot.
 
+    When ``source_channel`` is given, only target-ID frames on that channel are
+    converted; the same ID on any other channel is left unchanged.
+
     ``progress``, when given, is called with this file's 0.0-1.0 completion
     fraction as it is read.
     """
     converted = 0
     discarded = 0
+    style = detect_style(source)
     active: CanRecord | None = None
     payload = bytearray()
     expected_length = 0
@@ -191,7 +283,7 @@ def convert_file(
     def flush_converted(handle) -> None:
         nonlocal active, held_lines, retained_lines, converted
         if active is not None and expected_length <= 64 and len(payload) >= expected_length:
-            handle.write(fd_line(active, bytes(payload[:expected_length]).ljust(64, b"\xAA"), fd_channel))
+            handle.write(fd_line(active, bytes(payload[:expected_length]).ljust(64, b"\xAA"), fd_channel, style))
             handle.writelines(retained_lines)
             converted += 1
         else:
@@ -221,12 +313,12 @@ def convert_file(
             if progress is not None and bytes_read >= next_report:
                 next_report = bytes_read + 256 * 1024
                 progress(min(bytes_read / file_size, 1.0))
-            record = parse_record(line, target_id)
+            record = parse_record(line, target_id, source_channel)
             if active is None:
                 if record is not None and len(record.data) == 8 and record.data[0] == 0x10:
                     begin(record, line)
                 elif record is not None and is_short_single_frame(record):
-                    write_short_single_frame(output_file, record, fd_channel)
+                    write_short_single_frame(output_file, record, fd_channel, style)
                     converted += 1
                 elif record is not None:
                     # Output must contain only the generated CAN FD 6F4 frames;
@@ -266,7 +358,7 @@ def convert_file(
             if len(record.data) == 8 and record.data[0] == 0x10:
                 begin(record, line)
             elif is_short_single_frame(record):
-                write_short_single_frame(output_file, record, fd_channel)
+                write_short_single_frame(output_file, record, fd_channel, style)
                 converted += 1
             else:
                 # Any remaining classic CAN 6F4 record is intentionally removed.
@@ -359,6 +451,24 @@ def collect_asc_files(selections: list[Path]) -> list[Path]:
     return sorted(files.values(), key=lambda item: str(item).lower())
 
 
+def detect_source_channel(sources: list[Path], target_id: int) -> str | None:
+    """Return the first source channel carrying ``target_id``, or None.
+
+    Stops as soon as the target standard-CAN ID is found so large captures are
+    not scanned in full just to locate the channel.
+    """
+    for source in sources:
+        try:
+            with source.open("r", encoding="utf-8-sig", newline="") as handle:
+                for line in handle:
+                    record = parse_record(line, target_id)
+                    if record is not None:
+                        return record.channel
+        except (OSError, UnicodeError):
+            continue
+    return None
+
+
 def application_directory() -> Path:
     """Keep the out directory beside the script, or beside the frozen EXE."""
     if getattr(sys, "frozen", False):
@@ -421,6 +531,7 @@ def convert_sources(
     output_dir: Path,
     fd_channel: str,
     target_id: int = DEFAULT_TARGET_ID,
+    source_channel: str | None = None,
     progress: Callable[[float], None] | None = None,
 ) -> tuple[int, int, int, list[str]]:
     """Convert every discovered ASC file and return file/count/error statistics.
@@ -450,7 +561,7 @@ def convert_sources(
                 progress(start + fraction * (end - start))
 
         try:
-            file_transfers, file_discarded = convert_file(source, destination, fd_channel, target_id, progress=file_progress)
+            file_transfers, file_discarded = convert_file(source, destination, fd_channel, target_id, source_channel, progress=file_progress)
             converted_files += 1
             transfers += file_transfers
             discarded += file_discarded
@@ -464,7 +575,7 @@ class ConverterApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("CAN 转 CAN FD 工具")
-        self.root.geometry("900x720")
+        self.root.geometry("900x760")
         self.root.minsize(720, 560)
         self.sources: list[Path] = []
         self.last_output_dir: Path | None = None
@@ -475,6 +586,7 @@ class ConverterApp:
         style.configure("Title.TLabel", font=("Microsoft YaHei UI", 16, "bold"))
         style.configure("Subtitle.TLabel", foreground="#5b6472")
         style.configure("Primary.TButton", font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("Thick.Horizontal.TProgressbar", thickness=20)
 
         frame = ttk.Frame(root, padding=18)
         frame.pack(fill="both", expand=True)
@@ -532,10 +644,10 @@ class ConverterApp:
 
         status_box = ttk.LabelFrame(frame, text=" 运行状态 ", padding=10)
         status_box.grid(row=4, column=0, sticky="nsew", pady=(14, 0))
-        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100)
-        self.progress.pack(fill="x", pady=(0, 8))
         self.status = Text(status_box, height=6, wrap="word", state=DISABLED, relief="flat", background="#f7f8fa")
         self.status.pack(fill="both", expand=True)
+        self.progress = ttk.Progressbar(status_box, mode="determinate", maximum=100, style="Thick.Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(8, 0))
         self.set_status("准备就绪：请先添加 ASC 文件或文件夹。")
         center_window(self.root)
 
@@ -631,6 +743,7 @@ class ConverterApp:
         except ValueError as error:
             messagebox.showwarning("CAN 转 CAN FD 工具", str(error))
             return
+        source_channel = detect_source_channel(files, target_id)
         try:
             output_dir = create_output_directory()
         except OSError as error:
@@ -640,15 +753,18 @@ class ConverterApp:
         self.convert_button.configure(state=DISABLED)
         self.progress.configure(value=0)
         self.set_status(f"正在转换 {len(files)} 个 ASC 文件（输入 ID：{target_id:X}，输出通道：{fd_channel}），请稍候……")
-        threading.Thread(target=self.convert_worker, args=(self.sources.copy(), output_dir, fd_channel, target_id), daemon=True).start()
+        threading.Thread(target=self.convert_worker, args=(self.sources.copy(), output_dir, fd_channel, target_id, source_channel), daemon=True).start()
 
-    def convert_worker(self, sources: list[Path], output_dir: Path, fd_channel: str, target_id: int) -> None:
+    def convert_worker(self, sources: list[Path], output_dir: Path, fd_channel: str, target_id: int, source_channel: str | None) -> None:
         def report(fraction: float) -> None:
             self.root.after(0, self.update_progress, fraction)
 
         try:
-            files, transfers, discarded, errors = convert_sources(sources, output_dir, fd_channel, target_id, progress=report)
-            message = f"转换完成：已处理 {files} 个文件、{transfers} 组输入 ID {target_id:X} 的传输数据；已移除 {discarded} 个不完整或孤立报文。\n输出目录：{output_dir}"
+            files, transfers, discarded, errors = convert_sources(sources, output_dir, fd_channel, target_id, source_channel, progress=report)
+            message = f"转换完成：已处理 {files} 个文件、{transfers} 组输入 ID {target_id:X} 的传输数据；已移除 {discarded} 个不完整或孤立报文。"
+            if source_channel is not None:
+                message += f"\n源通道：{source_channel}"
+            message += f"\n输出目录：{output_dir}"
             if errors:
                 message += "\n转换失败的文件：\n" + "\n".join(errors)
             self.root.after(0, self.conversion_finished, message, not errors)
@@ -673,9 +789,12 @@ def main() -> None:
     if args.selections:
         target_id = parse_target_can_id(args.can_id)
         fd_channel = validate_fd_channel(args.fd_channel)
+        source_channel = detect_source_channel(collect_asc_files(args.selections), target_id)
         output_dir = create_output_directory(args.out_root)
-        files, transfers, discarded, errors = convert_sources(args.selections, output_dir, fd_channel, target_id)
+        files, transfers, discarded, errors = convert_sources(args.selections, output_dir, fd_channel, target_id, source_channel)
         print(f"Converted {files} file(s), {transfers} CAN ID {target_id:X} transfer(s); removed {discarded} incomplete/orphan item(s).")
+        if source_channel is not None:
+            print(f"Source channel: {source_channel}")
         print(f"Output: {output_dir}")
         if errors:
             print("Failed files:\n" + "\n".join(errors), file=sys.stderr)
