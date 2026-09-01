@@ -13,19 +13,20 @@ Vector CAN 日志处理工具集，包含三个 Windows GUI 工具：
 | `CANProcess_BlfAscConvert.py` | BLF / ASC 互转工具（GUI + 命令行模式） |
 | `CANProcess_AscCAN2FD.py` | CAN 转 CAN FD 工具（GUI + 命令行模式） |
 | `CANProcess_AscMerger.py` | ASC 日志合并工具（GUI） |
-| `Py2Exe.bat` | 基于 PyInstaller 的通用打包脚本 |
+| `CANProcess_BlfAscConvert.bat` | 使用本地 Python 启动 BLF / ASC 互转工具 |
+| `CANProcess_AscCAN2FD.bat` | 使用本地 Python 启动 CAN 转 CAN FD 工具 |
+| `CANProcess_AscMerger.bat` | 使用本地 Python 启动 ASC 合并工具 |
+| `DevEnv\python\` | 本地 Python、Tkinter 和工具依赖 |
+| Py2Exe.bat | 基于 PyInstaller 的通用打包脚本（固定使用本地 Python） |
+| CleanPyCache.bat | 清理项目内全部 Python __pycache__ 缓存目录 | 
 | `release/` | 已打包好的 EXE 文件 |
 
 ## 依赖
 
-- Python 3.10+
-- BLF / ASC 互转工具依赖 [`python-can`](https://pypi.org/project/python-can/)；其余工具仅使用标准库（tkinter、ctypes 等）
-- 可选：`tkinterdnd2`（启用后支持将文件拖放到窗口列表）
+- 内置 `DevEnv\python\python.exe`（完整 Python + Tcl/Tk）
+- 内置 `python-can`（BLF / ASC 互转）、`tkinterdnd2`（文件拖放）和 PyInstaller
 
-```powershell
-pip install python-can     # BLF / ASC 互转工具必需
-pip install tkinterdnd2    # 可选，拖放支持
-```
+运行和打包均使用内置 Python，不依赖系统 Python。若本地 Python 缺少 PyInstaller、`python-can` 或 `tkinterdnd2`，`Py2Exe.bat` 会自动下载安装到 `DevEnv\python`。
 
 ## 使用方式
 
@@ -33,19 +34,31 @@ pip install tkinterdnd2    # 可选，拖放支持
 
 进入 `release` 文件夹，双击对应的 EXE 文件。
 
-### 方式二：Python 运行
+### 方式二：同名 BAT 启动（推荐）
+
+双击对应 BAT 即可打开 GUI；也可以把输入文件拖到对应 BAT 图标上：
+
+```text
+CANProcess_BlfAscConvert.bat
+CANProcess_AscCAN2FD.bat
+CANProcess_AscMerger.bat
+```
+
+三个 BAT 均固定使用 `DevEnv\python\python.exe`，不依赖系统 Python。
+
+### 方式三：Python 运行
 
 ```powershell
 # 打开 GUI
-python CANProcess_BlfAscConvert.py
-python CANProcess_AscCAN2FD.py
-python CANProcess_AscMerger.py
+.\DevEnv\python\python.exe .\CANProcess_BlfAscConvert.py
+.\DevEnv\python\python.exe .\CANProcess_AscCAN2FD.py
+.\DevEnv\python\python.exe .\CANProcess_AscMerger.py
 
 # BLF / ASC 互转：命令行模式（无 GUI）
-python CANProcess_BlfAscConvert.py <BLF/ASC 文件或文件夹> [--direction auto|blf2asc|asc2blf] [--out-root 输出目录]
+.\DevEnv\python\python.exe .\CANProcess_BlfAscConvert.py <BLF/ASC 文件或文件夹> [--direction auto|blf2asc|asc2blf] [--out-root 输出目录]
 
 # CAN 转 CAN FD：命令行模式（无 GUI）
-python CANProcess_AscCAN2FD.py <ASC 文件或文件夹> [--fd-channel 10] [--can-id 6F4] [--out-root 输出目录]
+.\DevEnv\python\python.exe .\CANProcess_AscCAN2FD.py <ASC 文件或文件夹> [--fd-channel 10] [--can-id 6F4] [--out-root 输出目录]
 ```
 
 ## BLF / ASC 互转工具
@@ -106,8 +119,9 @@ Py2Exe.bat CANProcess_AscMerger.py
 
 默认参数：`--onefile --windowed`，输出到脚本旁的 `release` 文件夹。可用 `Py2Exe.bat --help` 查看全部选项。
 
-需要预先安装 PyInstaller：
+`Py2Exe.bat` 固定使用 `DevEnv\python\python.exe`。若缺少所需打包或运行依赖，脚本会自动安装到该本地目录。
 
-```powershell
-py -3 -m pip install pyinstaller
-```
+
+## 提交前清理缓存
+
+双击 CleanPyCache.bat，即可删除项目目录及子目录内所有 __pycache__ 缓存目录，避免将 Python 字节码缓存提交到 Git。

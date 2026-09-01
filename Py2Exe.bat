@@ -135,20 +135,35 @@ set "BUILD_ROOT=%SOURCE_DIR%build"
 set "WORK_DIR=%BUILD_ROOT%\pyinstaller\%APP_NAME%"
 set "SPEC_DIR=%BUILD_ROOT%\spec"
 
-py -3 -m PyInstaller --version >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON=py -3"
-    goto build
-)
-python -m PyInstaller --version >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON=python"
-    goto build
+set "PYTHON=%~dp0DevEnv\python\python.exe"
+if not exist "%PYTHON%" (
+    echo [ERROR] Local Python was not found: %PYTHON%
+    exit /b 1
 )
 
-echo [ERROR] PyInstaller was not found for Python 3.
-echo Install it with: py -3 -m pip install pyinstaller
-exit /b 1
+"%PYTHON%" -m pip --version >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] pip is missing from DevEnv\python.
+    echo Reinstall the local Python environment with pip enabled.
+    exit /b 1
+)
+
+"%PYTHON%" -c "import tkinter" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Tkinter is missing from DevEnv\python.
+    echo Reinstall the local Python environment with Tcl/Tk enabled.
+    exit /b 1
+)
+
+"%PYTHON%" -c "import PyInstaller, can, tkinterdnd2" >nul 2>&1
+if errorlevel 1 (
+    echo Installing missing build and runtime dependencies into DevEnv\python...
+    "%PYTHON%" -m pip install --upgrade pyinstaller python-can tkinterdnd2
+    if errorlevel 1 (
+        echo [ERROR] Dependency installation failed.
+        exit /b 1
+    )
+)
 
 :build
 rem --clean clears PyInstaller's temporary cache. Build/spec files stay beside the
@@ -160,13 +175,13 @@ echo Name:    %APP_NAME%
 echo Mode:    %BUNDLE_MODE% %UI_MODE%
 echo.
 
-%PYTHON% -m PyInstaller ^
+"%PYTHON%" -m PyInstaller ^
     --noconfirm --clean %BUNDLE_MODE% %UI_MODE% ^
     --name "%APP_NAME%" ^
     --distpath "%OUTPUT_DIR%" ^
     --workpath "%WORK_DIR%" ^
     --specpath "%SPEC_DIR%" ^
-    %ICON_ARG% %DATA_ARGS% %EXTRA_ARGS% ^
+    --collect-data tkinterdnd2 %ICON_ARG% %DATA_ARGS% %EXTRA_ARGS% ^
     "%SOURCE%"
 
 if errorlevel 1 (
