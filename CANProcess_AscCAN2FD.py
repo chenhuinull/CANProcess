@@ -477,8 +477,8 @@ def application_directory() -> Path:
 
 
 def create_output_directory(root: Path | None = None) -> Path:
-    """Create a unique out/AscCAN2FD_YYYYmmdd_HHMMSS directory for one conversion run."""
-    output_root = root if root is not None else application_directory() / "out"
+    """Create a unique AscCAN2FD_YYYYmmdd_HHMMSS directory beside the tool."""
+    output_root = root if root is not None else application_directory()
     output_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     destination = output_root / f"AscCAN2FD_{timestamp}"
@@ -632,7 +632,7 @@ class ConverterApp:
         ttk.Entry(settings_bar, width=12, textvariable=self.fd_channel).pack(side="left", padx=(4, 0))
         ttk.Label(
             operation_box,
-            text="输出位置：out\\AscCAN2FD_YYYYMMDD_HHMMSS\n每个输入 ASC 文件都会生成一个单独的转换结果。",
+            text="输出位置：工具所在目录\\AscCAN2FD_YYYYMMDD_HHMMSS\n每个输入 ASC 文件都会生成一个单独的转换结果。",
             justify="left",
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
         button_bar = ttk.Frame(operation_box)
@@ -721,8 +721,8 @@ class ConverterApp:
             file_list.insert(END, str(path))
 
     def open_output_folder(self) -> None:
-        """Open the latest run's output folder, or the shared out folder."""
-        output_dir = self.last_output_dir or (application_directory() / "out")
+        """Open the latest run's output folder, or the tool's root folder."""
+        output_dir = self.last_output_dir or application_directory()
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
             os.startfile(output_dir)  # type: ignore[attr-defined]  # Windows-only application.
@@ -775,7 +775,6 @@ class ConverterApp:
         self.progress.configure(value=100 if succeeded else 0)
         self.set_status(message)
         self.convert_button.configure(state=NORMAL)
-        (messagebox.showinfo if succeeded else messagebox.showerror)("CAN 转 CAN FD 工具", message)
 
 
 def main() -> None:

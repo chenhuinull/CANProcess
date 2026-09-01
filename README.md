@@ -16,23 +16,23 @@ Vector CAN 日志处理工具集，包含三个 Windows GUI 工具：
 | `CANProcess_BlfAscConvert.bat` | 使用本地 Python 启动 BLF / ASC 互转工具 |
 | `CANProcess_AscCAN2FD.bat` | 使用本地 Python 启动 CAN 转 CAN FD 工具 |
 | `CANProcess_AscMerger.bat` | 使用本地 Python 启动 ASC 合并工具 |
-| `DevEnv\python\` | 本地 Python、Tkinter 和工具依赖 |
+| `Toolchain\python\` | 本地 Python、Tkinter 和工具依赖 |
 | Py2Exe.bat | 基于 PyInstaller 的通用打包脚本（固定使用本地 Python） |
-| CleanPyCache.bat | 清理项目内全部 Python __pycache__ 缓存目录 | 
-| `release/` | 已打包好的 EXE 文件 |
+| Clean.bat | 清理项目内全部 Python __pycache__ 缓存目录 | 
+| `Out/` | 已打包好的 EXE 文件 |
 
 ## 依赖
 
-- 内置 `DevEnv\python\python.exe`（完整 Python + Tcl/Tk）
+- 内置 `Toolchain\python\python.exe`（完整 Python + Tcl/Tk）
 - 内置 `python-can`（BLF / ASC 互转）、`tkinterdnd2`（文件拖放）和 PyInstaller
 
-运行和打包均使用内置 Python，不依赖系统 Python。若本地 Python 缺少 PyInstaller、`python-can` 或 `tkinterdnd2`，`Py2Exe.bat` 会自动下载安装到 `DevEnv\python`。
+运行和打包均使用内置 Python，不依赖系统 Python。若本地 Python 缺少 PyInstaller、`python-can` 或 `tkinterdnd2`，`Py2Exe.bat` 会自动下载安装到 `Toolchain\python`。
 
 ## 使用方式
 
 ### 方式一：直接运行 EXE
 
-进入 `release` 文件夹，双击对应的 EXE 文件。
+进入 `Out` 文件夹，双击对应的 EXE 文件。
 
 ### 方式二：同名 BAT 启动（推荐）
 
@@ -44,21 +44,21 @@ CANProcess_AscCAN2FD.bat
 CANProcess_AscMerger.bat
 ```
 
-三个 BAT 均固定使用 `DevEnv\python\python.exe`，不依赖系统 Python。
+三个 BAT 均固定使用 `Toolchain\python\python.exe`，不依赖系统 Python。
 
 ### 方式三：Python 运行
 
 ```powershell
 # 打开 GUI
-.\DevEnv\python\python.exe .\CANProcess_BlfAscConvert.py
-.\DevEnv\python\python.exe .\CANProcess_AscCAN2FD.py
-.\DevEnv\python\python.exe .\CANProcess_AscMerger.py
+.\Toolchain\python\python.exe .\CANProcess_BlfAscConvert.py
+.\Toolchain\python\python.exe .\CANProcess_AscCAN2FD.py
+.\Toolchain\python\python.exe .\CANProcess_AscMerger.py
 
 # BLF / ASC 互转：命令行模式（无 GUI）
-.\DevEnv\python\python.exe .\CANProcess_BlfAscConvert.py <BLF/ASC 文件或文件夹> [--direction auto|blf2asc|asc2blf] [--out-root 输出目录]
+.\Toolchain\python\python.exe .\CANProcess_BlfAscConvert.py <BLF/ASC 文件或文件夹> [--direction auto|blf2asc|asc2blf] [--out-root 输出目录]
 
 # CAN 转 CAN FD：命令行模式（无 GUI）
-.\DevEnv\python\python.exe .\CANProcess_AscCAN2FD.py <ASC 文件或文件夹> [--fd-channel 10] [--can-id 6F4] [--out-root 输出目录]
+.\Toolchain\python\python.exe .\CANProcess_AscCAN2FD.py <ASC 文件或文件夹> [--fd-channel 10] [--can-id 6F4] [--out-root 输出目录]
 ```
 
 ## BLF / ASC 互转工具
@@ -72,7 +72,7 @@ CANProcess_AscMerger.bat
 
 ### 输出
 
-- 结果保存到 `out\YYYYMMDD_HHMMSS` 文件夹（脚本或 EXE 所在目录下），每个输入文件生成一个同名的 `.asc` 或 `.blf`。
+- 结果保存到 `BlfAscConvert_YYYYMMDD_HHMMSS` 文件夹（工具所在目录下），每个输入文件生成一个同名的 `.asc` 或 `.blf`。
 - 个别文件损坏或格式不受支持时会跳过并在结果中列出，不影响其余文件转换。
 
 ## CAN 转 CAN FD 工具
@@ -92,7 +92,7 @@ CANProcess_AscMerger.bat
 
 ### 输出
 
-- 结果保存到 `out\YYYYMMDD_HHMMSS` 文件夹（脚本或 EXE 所在目录下），每个输入文件生成一个 `<文件名>_CANFD.asc`。
+- 结果保存到 `AscCAN2FD_YYYYMMDD_HHMMSS` 文件夹（工具所在目录下），每个输入文件生成一个 `<文件名>_CANFD.asc`。
 
 ## ASC 日志合并工具
 
@@ -105,7 +105,8 @@ CANProcess_AscMerger.bat
 
 ### 输出
 
-- 通过保存对话框选择输出位置，默认文件名为 `AscMerger_YYYYMMDD_HHMMSS.asc`。
+- 结果保存到工具所在目录下的 `AscMerger_YYYYMMDD_HHMMSS` 文件夹，文件名为 `AscMerger_时间戳.asc`。
+- 转换/合并结果仅在窗口下方的运行状态区域显示，不会弹出提示框。
 
 ## 打包 EXE
 
@@ -117,11 +118,11 @@ Py2Exe.bat CANProcess_AscCAN2FD.py
 Py2Exe.bat CANProcess_AscMerger.py
 ```
 
-默认参数：`--onefile --windowed`，输出到脚本旁的 `release` 文件夹。可用 `Py2Exe.bat --help` 查看全部选项。
+默认参数：`--onefile --windowed`，输出到脚本旁的 `Out` 文件夹。可用 `Py2Exe.bat --help` 查看全部选项。
 
-`Py2Exe.bat` 固定使用 `DevEnv\python\python.exe`。若缺少所需打包或运行依赖，脚本会自动安装到该本地目录。
+`Py2Exe.bat` 固定使用 `Toolchain\python\python.exe`。若缺少所需打包或运行依赖，脚本会自动安装到该本地目录。
 
 
 ## 提交前清理缓存
 
-双击 CleanPyCache.bat，即可删除项目目录及子目录内所有 __pycache__ 缓存目录，避免将 Python 字节码缓存提交到 Git。
+双击 Clean.bat，即可删除项目目录及子目录内所有 __pycache__ 缓存目录，避免将 Python 字节码缓存提交到 Git。

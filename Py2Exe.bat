@@ -21,7 +21,7 @@ rem This value is used for drag-and-drop builds unless --console/--windowed is s
 set "DEFAULT_UI_MODE=--windowed"
 
 rem Output directory name. It is created beside the input .py file.
-set "OUTPUT_FOLDER_NAME=release"
+set "OUTPUT_FOLDER_NAME=Out"
 
 rem Set to 1 to use a matching icon automatically (MyTool.py -> MyTool.ico).
 rem Set to 0 to disable this lookup. An explicit --icon option always wins.
@@ -135,7 +135,7 @@ set "BUILD_ROOT=%SOURCE_DIR%build"
 set "WORK_DIR=%BUILD_ROOT%\pyinstaller\%APP_NAME%"
 set "SPEC_DIR=%BUILD_ROOT%\spec"
 
-set "PYTHON=%~dp0DevEnv\python\python.exe"
+set "PYTHON=%~dp0Toolchain\python\python.exe"
 if not exist "%PYTHON%" (
     echo [ERROR] Local Python was not found: %PYTHON%
     exit /b 1
@@ -143,21 +143,21 @@ if not exist "%PYTHON%" (
 
 "%PYTHON%" -m pip --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] pip is missing from DevEnv\python.
+    echo [ERROR] pip is missing from Toolchain\python.
     echo Reinstall the local Python environment with pip enabled.
     exit /b 1
 )
 
 "%PYTHON%" -c "import tkinter" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Tkinter is missing from DevEnv\python.
+    echo [ERROR] Tkinter is missing from Toolchain\python.
     echo Reinstall the local Python environment with Tcl/Tk enabled.
     exit /b 1
 )
 
 "%PYTHON%" -c "import PyInstaller, can, tkinterdnd2" >nul 2>&1
 if errorlevel 1 (
-    echo Installing missing build and runtime dependencies into DevEnv\python...
+    echo Installing missing build and runtime dependencies into Toolchain\python...
     "%PYTHON%" -m pip install --upgrade pyinstaller python-can tkinterdnd2
     if errorlevel 1 (
         echo [ERROR] Dependency installation failed.

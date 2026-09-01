@@ -133,8 +133,8 @@ def application_directory() -> Path:
 
 
 def create_output_directory(root: Path | None = None) -> Path:
-    """Create a unique out/BlfAscConvert_YYYYmmdd_HHMMSS run directory."""
-    output_root = root if root is not None else application_directory() / "out"
+    """Create a unique BlfAscConvert_YYYYmmdd_HHMMSS run directory beside the tool."""
+    output_root = root if root is not None else application_directory()
     output_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     destination = output_root / f"BlfAscConvert_{timestamp}"
@@ -178,6 +178,28 @@ def destination_for(source: Path, output_dir: Path, used_names: set[str]) -> Pat
         index += 1
     used_names.add(candidate.name.casefold())
     return candidate
+
+
+def fix_asc_date_header(path: Path, recording_timestamp: float) -> None:
+    """Replace python-can ASCWriter's datetime.now() date header with the recording date."""
+    recording_date = datetime.fromtimestamp(recording_timestamp)
+    weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    msec = recording_date.microsecond // 1000
+    line = (
+        f"date {weekdays[recording_date.weekday()]} {months[recording_date.month - 1]} "
+        f"{recording_date.day:2d} {recording_date:%H:%M:%S}.{msec} {recording_date.year:04d}\n"
+    ).encode("ascii")
+    temp = path.with_suffix(".tmp")
+    with path.open("rb") as src, temp.open("wb") as dst:
+        src.readline()
+        dst.write(line)
+        while True:
+            chunk = src.read(1024 * 1024)
+            if not chunk:
+                break
+            dst.write(chunk)
+    temp.replace(path)
 
 
 # Vector CANoe writes ASC lines with an explicit frame-type keyword, while the
@@ -483,6 +505,7 @@ def convert_file(
     file_size = source.stat().st_size or 1
     count = 0
     next_report = 0
+    first_timestamp = None
     try:
         for message in reader:
             # BLF cannot represent pre-1970 timestamps; clamp so a bad header
@@ -491,6 +514,8 @@ def convert_file(
                 if suffix == ASC_SUFFIX and message.timestamp < MIN_BLF_EPOCH:
                     message.timestamp = MIN_BLF_EPOCH
                 message.timestamp += time_shift
+                if first_timestamp is None:
+                    first_timestamp = message.timestamp
             writer.on_message_received(message)
             count += 1
             if progress is not None and count >= next_report:
@@ -503,6 +528,8 @@ def convert_file(
     finally:
         writer.stop()
         reader.stop()
+    if suffix == BLF_SUFFIX and first_timestamp is not None:
+        fix_asc_date_header(destination, first_timestamp)
     if progress is not None:
         progress(1.0)
     if suffix == ASC_SUFFIX:
@@ -637,7 +664,7 @@ class ConverterApp:
         direction_box.pack(side="left", padx=(4, 0))
         ttk.Label(
             operation_box,
-            text="输出位置：out\\BlfAscConvert_YYYYMMDD_HHMMSS\n每个输入文件都会生成一个同名的 .blf 或 .asc 文件。",
+            text="输出位置：工具所在目录\\BlfAscConvert_YYYYMMDD_HHMMSS\n每个输入文件都会生成一个同名的 .blf 或 .asc 文件。",
             justify="left",
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
         button_bar = ttk.Frame(operation_box)
@@ -735,8 +762,8 @@ class ConverterApp:
         ttk.Button(container, text="关闭", command=dialog.destroy).pack(anchor="e", pady=(10, 0))
 
     def open_output_folder(self) -> None:
-        """Open the latest run's output folder, or the shared out folder."""
-        output_dir = self.last_output_dir or (application_directory() / "out")
+        """Open the latest run's output folder, or the tool's root folder."""
+        output_dir = self.last_output_dir or application_directory()
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
             os.startfile(output_dir)  # type: ignore[attr-defined]  # Windows-only application.
@@ -785,7 +812,6 @@ class ConverterApp:
         self.progress.configure(value=100 if succeeded else 0)
         self.set_status(message)
         self.convert_button.configure(state=NORMAL)
-        (messagebox.showinfo if succeeded else messagebox.showerror)("BLF / ASC 互转工具", message)
 
 
 def main() -> None:

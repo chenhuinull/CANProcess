@@ -59,8 +59,8 @@ def application_directory() -> Path:
 
 
 def create_output_directory(root: Path | None = None) -> Path:
-    """Create a unique out/AscMerger_YYYYmmdd_HHMMSS directory for one merge run."""
-    output_root = root if root is not None else application_directory() / "out"
+    """Create a unique AscMerger_YYYYmmdd_HHMMSS directory for one merge run."""
+    output_root = root if root is not None else application_directory()
     output_root.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     destination = output_root / f"AscMerger_{timestamp}"
@@ -325,7 +325,7 @@ class App:
         operation_box.columnconfigure(0, weight=1)
         ttk.Label(
             operation_box,
-            text="输出位置：out\\AscMerger_YYYYMMDD_HHMMSS\\AscMerger_时间戳.asc\n合并前可查看实际扫描到的 ASC 文件，合并完成后会显示无效文件与时间重叠检查结果。",
+            text="输出位置：工具所在目录\\AscMerger_YYYYMMDD_HHMMSS\\AscMerger_时间戳.asc\n合并前可查看实际扫描到的 ASC 文件，合并完成后会显示无效文件与时间重叠检查结果。",
             justify="left",
         ).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
         button_bar = ttk.Frame(operation_box)
@@ -419,8 +419,8 @@ class App:
         ttk.Button(container, text="关闭", command=dialog.destroy).pack(anchor="e", pady=(10, 0))
 
     def open_output_folder(self) -> None:
-        """Open the latest run's output folder, or the shared out folder."""
-        output_dir = self.last_output_dir or (application_directory() / "out")
+        """Open the latest run's output folder, or the tool's root folder."""
+        output_dir = self.last_output_dir or application_directory()
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
             os.startfile(output_dir)  # type: ignore[attr-defined]  # Windows-only application.
@@ -465,8 +465,6 @@ class App:
         self.progress.configure(value=100 if succeeded else 0)
         self.set_status(message)
         self.merge_button.configure(state=NORMAL)
-        if not succeeded:
-            messagebox.showerror("ASC 日志合并工具", message)
 
 
 if __name__ == "__main__":
