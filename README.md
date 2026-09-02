@@ -1,10 +1,12 @@
 # CANProcess
 
-Vector CAN 日志处理工具集，包含三个 Windows GUI 工具：
+Vector CAN 日志处理工具集，包含五个 Windows GUI 工具：
 
 - **BLF / ASC 互转工具**（`CANProcess_BlfAscConvert.py`）：将 Vector BLF 与 ASC 日志互相转换，支持一次添加多个文件或文件夹批量处理，兼容经典 CAN 与 CAN FD。
 - **CAN 转 CAN FD 工具**（`CANProcess_AscCAN2FD.py`）：将 ASC 文件中指定 CAN ID 的经典 CAN 8 字节报文（ISO-TP 风格多帧传输）合并转换为 64 字节 CAN FD 报文。
+- **CAN 转 CAN FD 工具（BLF）**（`CANProcess_BlfCAN2FD.py`）：与 ASC 版功能相同，输入与输出均为 BLF 文件。
 - **ASC 日志合并工具**（`CANProcess_AscMerger.py`）：将多个 ASC 日志文件按记录起始时间合并为一个文件，并检查时间重叠。
+- **BLF 日志合并工具**（`CANProcess_BlfMerger.py`）：将多个 BLF 日志文件按记录起始时间合并为一个文件，并检查时间重叠。
 
 ## 文件说明
 
@@ -12,10 +14,14 @@ Vector CAN 日志处理工具集，包含三个 Windows GUI 工具：
 | --- | --- |
 | `CANProcess_BlfAscConvert.py` | BLF / ASC 互转工具（GUI + 命令行模式） |
 | `CANProcess_AscCAN2FD.py` | CAN 转 CAN FD 工具（GUI + 命令行模式） |
+| `CANProcess_BlfCAN2FD.py` | CAN 转 CAN FD 工具（BLF，GUI + 命令行模式） |
 | `CANProcess_AscMerger.py` | ASC 日志合并工具（GUI） |
+| `CANProcess_BlfMerger.py` | BLF 日志合并工具（GUI） |
 | `CANProcess_BlfAscConvert.bat` | 使用本地 Python 启动 BLF / ASC 互转工具 |
 | `CANProcess_AscCAN2FD.bat` | 使用本地 Python 启动 CAN 转 CAN FD 工具 |
+| `CANProcess_BlfCAN2FD.bat` | 使用本地 Python 启动 CAN 转 CAN FD 工具（BLF） |
 | `CANProcess_AscMerger.bat` | 使用本地 Python 启动 ASC 合并工具 |
+| `CANProcess_BlfMerger.bat` | 使用本地 Python 启动 BLF 合并工具 |
 | `Toolchain\python\` | 本地 Python、Tkinter 和工具依赖 |
 | Py2Exe.bat | 基于 PyInstaller 的通用打包脚本（固定使用本地 Python） |
 | Clean.bat | 清理项目内全部 Python __pycache__ 缓存目录 | 
@@ -41,10 +47,12 @@ Vector CAN 日志处理工具集，包含三个 Windows GUI 工具：
 ```text
 CANProcess_BlfAscConvert.bat
 CANProcess_AscCAN2FD.bat
+CANProcess_BlfCAN2FD.bat
 CANProcess_AscMerger.bat
+CANProcess_BlfMerger.bat
 ```
 
-三个 BAT 均固定使用 `Toolchain\python\python.exe`，不依赖系统 Python。
+五个 BAT 均固定使用 `Toolchain\python\python.exe`，不依赖系统 Python。
 
 ### 方式三：Python 运行
 
@@ -52,13 +60,18 @@ CANProcess_AscMerger.bat
 # 打开 GUI
 .\Toolchain\python\python.exe .\CANProcess_BlfAscConvert.py
 .\Toolchain\python\python.exe .\CANProcess_AscCAN2FD.py
+.\Toolchain\python\python.exe .\CANProcess_BlfCAN2FD.py
 .\Toolchain\python\python.exe .\CANProcess_AscMerger.py
+.\Toolchain\python\python.exe .\CANProcess_BlfMerger.py
 
 # BLF / ASC 互转：命令行模式（无 GUI）
 .\Toolchain\python\python.exe .\CANProcess_BlfAscConvert.py <BLF/ASC 文件或文件夹> [--direction auto|blf2asc|asc2blf] [--out-root 输出目录]
 
 # CAN 转 CAN FD：命令行模式（无 GUI）
 .\Toolchain\python\python.exe .\CANProcess_AscCAN2FD.py <ASC 文件或文件夹> [--fd-channel 10] [--can-id 6F4] [--out-root 输出目录]
+
+# CAN 转 CAN FD（BLF）：命令行模式（无 GUI）
+.\Toolchain\python\python.exe .\CANProcess_BlfCAN2FD.py <BLF 文件或文件夹> [--fd-channel 10] [--can-id 6F4] [--out-root 输出目录]
 ```
 
 ## BLF / ASC 互转工具
@@ -94,6 +107,24 @@ CANProcess_AscMerger.bat
 
 - 结果保存到 `AscCAN2FD_YYYYMMDD_HHMMSS` 文件夹（工具所在目录下），每个输入文件生成一个 `<文件名>_CANFD.asc`。
 
+## CAN 转 CAN FD 工具（BLF）
+
+### 转换规则
+
+- 与 ASC 版（`CANProcess_AscCAN2FD.py`）规则一致，仅输入与输出格式改为 BLF：
+  - 目标 CAN ID 默认为 `0x6F4`，可在 GUI 中修改；
+  - 支持 ISO-TP 首帧 `10 LL` 与连续帧 `2N`，每个完整传输合并为一条 64 字节 CAN FD 报文，时间戳取首帧时刻；
+  - 超出声明长度的字节被丢弃，不足 64 字节的部分用 `AA` 填充；
+  - 短单帧（首字节为 0-7 的长度值）直接转换为 CAN FD；
+  - 原始经典 CAN 目标 ID 记录从结果中移除：完整传输与短单帧被 CAN FD 替换，不完整或孤立报文被丢弃；
+  - 其他 CAN ID 的交错报文按原时间顺序保留。
+- 输出 CAN FD 通道按 python-can 编号（0 起）填写，默认 10。
+- 转换结果仅在窗口下方的运行状态区域显示，不会弹出提示框。
+
+### 输出
+
+- 结果保存到 `BlfCAN2FD_YYYYMMDD_HHMMSS` 文件夹（工具所在目录下），每个输入文件生成一个 `<文件名>_CANFD.blf`。
+
 ## ASC 日志合并工具
 
 ### 合并规则
@@ -108,6 +139,19 @@ CANProcess_AscMerger.bat
 - 结果保存到工具所在目录下的 `AscMerger_YYYYMMDD_HHMMSS` 文件夹，文件名为 `AscMerger_时间戳.asc`。
 - 转换/合并结果仅在窗口下方的运行状态区域显示，不会弹出提示框。
 
+## BLF 日志合并工具
+
+### 合并规则
+
+- 通过 python-can 读取每个 BLF 文件的报文时间范围，按起始时间先后排序合并。
+- 每条报文保留其原始墙钟时刻，合并后输出一个按时间排序的 BLF；文件头 SYSTEMTIME 取自最早文件的起始时间。
+- 无法读取或无有效报文的文件自动跳过，并报告各文件之间的时间重叠。
+- 合并结果仅在窗口下方的运行状态区域显示，不会弹出提示框。
+
+### 输出
+
+- 结果保存到工具所在目录下的 `BlfMerger_YYYYMMDD_HHMMSS` 文件夹，文件名为 `BlfMerger_时间戳.blf`。
+
 ## 打包 EXE
 
 将 `.py` 文件拖到 `Py2Exe.bat` 上，或：
@@ -115,7 +159,9 @@ CANProcess_AscMerger.bat
 ```powershell
 Py2Exe.bat CANProcess_BlfAscConvert.py
 Py2Exe.bat CANProcess_AscCAN2FD.py
+Py2Exe.bat CANProcess_BlfCAN2FD.py
 Py2Exe.bat CANProcess_AscMerger.py
+Py2Exe.bat CANProcess_BlfMerger.py
 ```
 
 默认参数：`--onefile --windowed`，输出到脚本旁的 `Out` 文件夹。可用 `Py2Exe.bat --help` 查看全部选项。

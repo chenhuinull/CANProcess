@@ -575,8 +575,8 @@ class ConverterApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
         self.root.title("CAN 转 CAN FD 工具")
-        self.root.geometry("900x760")
-        self.root.minsize(720, 560)
+        self.root.geometry("900x680")
+        self.root.minsize(720, 540)
         self.sources: list[Path] = []
         self.last_output_dir: Path | None = None
         self.target_can_id = StringVar(value=f"{DEFAULT_TARGET_ID:X}")
@@ -591,7 +591,7 @@ class ConverterApp:
         frame = ttk.Frame(root, padding=18)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=3)
+        frame.rowconfigure(1, weight=2)
         frame.rowconfigure(4, weight=1)
 
         source_box = ttk.LabelFrame(frame, text=" 1. 输入文件和文件夹 ", padding=12)
@@ -608,8 +608,8 @@ class ConverterApp:
         list_frame = ttk.Frame(source_box)
         list_frame.grid(row=1, column=0, sticky="nsew")
         list_frame.columnconfigure(0, weight=1)
-        list_frame.rowconfigure(0, weight=1, minsize=180)
-        self.source_list = Listbox(list_frame, height=14, selectmode="extended", activestyle="none")
+        list_frame.rowconfigure(0, weight=1, minsize=80)
+        self.source_list = Listbox(list_frame, height=7, selectmode="extended", activestyle="none")
         self.source_list.grid(row=0, column=0, sticky="nsew")
         vertical_bar = ttk.Scrollbar(list_frame, orient="vertical", command=self.source_list.yview)
         vertical_bar.grid(row=0, column=1, sticky="ns")
